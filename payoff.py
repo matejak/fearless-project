@@ -1,3 +1,5 @@
+import collections
+
 import numpy as np
 import scipy as sp
 
@@ -27,6 +29,10 @@ def make_attenuation(dom, rate):
     return 1.0 / ret
 
 
+def make_degradation(rate):
+    return lambda dom: make_attenuation(dom, rate)
+
+
 def make_organic_payoff(lead_time, raise_rate, die_rate):
     def fun(dom):
         shifted_dom = dom - lead_time
@@ -41,26 +47,80 @@ def make_organic_payoff(lead_time, raise_rate, die_rate):
     return fun
 
 
-def plot():
+def plot(callback, delay, general_degradation=None, delay_degradation=1):
     fig = plt.figure()
-    ax = fig.add_subplot(111)
 
-    dom = np.linspace(0, 48, 200)
-    fun = make_trianular_payoff(1, 40)
-    fun = make_rect_payoff(2, 35)
-    fun = make_organic_payoff(2, 1.5, 1.01)
+    dom = np.linspace(0, 300, 500)
+    if general_degradation is None:
+        general_degradation = lambda x: 1
 
-    early = fun(dom)
-    late = fun(dom - 3)
-    plot_payoff_diff(ax, dom, early, late)
-    ax.grid()
-    ax.legend()
+    early = callback(dom)
+    early *= general_degradation(dom)
+    late = callback(dom - delay)
+    late *= general_degradation(dom) / delay_degradation
+    plot_payoff_diff(fig, dom, early, late)
     plt.show()
 
 
-def plot_payoff_diff(ax, dom, early, late):
-    early_wins_area = early > late
-    ax.plot(dom, early, color="black", label="Early execution")
-    ax.fill_between(dom[early_wins_area], early[early_wins_area], late[early_wins_area], label="Value lost")
+def plot_tea_rect():
+    fun = make_rect_payoff(2, 20)
+    plot(fun, 3)
+
+
+def plot_bread_rect():
+    fun = make_rect_payoff(2, 20)
+    plot(fun, 3, general_degradation=make_degradation(1.005), delay_degradation=1.1)
+
+
+def plot_tea_rect_degraded():
+    fun = make_rect_payoff(2, 35)
+    plot(fun, 3, make_degradation(1.005))
+
+
+def plot_tea_organic():
+    fun = make_organic_payoff(2, 1.5, 1.01)
+    plot(fun, 3)
+
+
+def plot_tea_organic_degrading():
+    fun = make_organic_payoff(2, 1.5, 1.01)
+    degradation = lambda dom: make_attenuation(dom, 1.01)
+    plot(fun, 3, degradation)
+
+
+vis = collections.namedtuple("vis", ("color", "quantity"))
+
+
+def plot_payoff_diff(fig, dom, early, late):
+    ax_values_zoomed = fig.add_subplot(311)
+    early_wins_area = early >= late
+    zoom_dst = 20
+    beginning = dom < zoom_dst
+    ax_values_zoomed.plot(dom[beginning], early[beginning], color="black", label="Early execution")
+    ax_values_zoomed.plot(dom[beginning], late[beginning], "--", color="black", label="Late execution")
+    ax_values_zoomed.fill_between(dom[early_wins_area * beginning], early[early_wins_area * beginning], late[early_wins_area * beginning], color="red", alpha=0.5, label="Value lost")
     late_wins_area = early < late
-    ax.fill_between(dom[late_wins_area], early[late_wins_area], late[late_wins_area], label="Value gained")
+    ax_values_zoomed.fill_between(dom[late_wins_area * beginning], early[late_wins_area * beginning], late[late_wins_area * beginning], color="green", alpha=0.5, label="Value gained")
+    ax_values_zoomed.grid()
+    ax_values_zoomed.legend()
+
+    ax_values = fig.add_subplot(312)
+    ax_values.plot(dom, early, color="black", label="Early execution")
+    ax_values.fill_between(dom[early_wins_area], early[early_wins_area], late[early_wins_area], color="red", alpha=0.5, label="Value lost")
+    late_wins_area = early < late
+    ax_values.fill_between(dom[late_wins_area], early[late_wins_area], late[late_wins_area], color="green", alpha=0.5, label="Value gained")
+    ax_values.grid()
+    ax_values.legend()
+
+    ax_summary = fig.add_subplot(313)
+    stuff = dict()
+
+    gained = (late - early)[late_wins_area].sum()
+    lost = (early - late)[early_wins_area].sum()
+    stuff["gained"] = vis(color="green", quantity=gained)
+    stuff["lost"] = vis(color="red", quantity=lost)
+    stuff["CoD"] = vis(color="black", quantity=-(gained - lost))
+    for key, val in stuff.items():
+        ax_summary.bar(key, val.quantity, color=val.color)
+
+    ax_summary.grid()
