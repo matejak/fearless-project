@@ -23,26 +23,32 @@ def make_trianular_payoff(lead_time, fade_away_time, peak_ratio=0.15):
     return fun.pdf
 
 
-def make_attenuation(dom, rate):
+def make_attenuation_starting_at(start, dom, rate):
+    dom = dom - start
     ret = rate ** dom
     ret[dom < 0] = 1
     return 1.0 / ret
+
+
+def make_attenuation(dom, rate):
+    return make_attenuation_starting_at(0, dom, rate)
 
 
 def make_degradation(rate):
     return lambda dom: make_attenuation(dom, rate)
 
 
-def make_organic_payoff(lead_time, raise_rate, die_rate):
+def make_organic_payoff(lead_time, raise_rate, die_rate, die_offset=0):
     def fun(dom):
         shifted_dom = dom - lead_time
         mask = shifted_dom > 0
         relevant_dom = shifted_dom[mask]
         ret = np.zeros_like(dom, dtype=float)
         base = 1.0 - 1.0 / (raise_rate ** relevant_dom)
-        atten = make_attenuation(relevant_dom, die_rate)
+        atten_mask = shifted_dom - die_offset > 0
+        atten = make_attenuation(shifted_dom[atten_mask] - die_offset, die_rate)
         ret[mask] = base
-        ret[mask] *= atten
+        ret[atten_mask] *= atten
         return ret
     return fun
 
@@ -58,6 +64,30 @@ def plot(callback, delay, general_degradation=None, delay_degradation=1):
     early *= general_degradation(dom)
     late = callback(dom - delay)
     late *= general_degradation(dom) / delay_degradation
+    plot_payoff_diff(fig, dom, early, late)
+    plt.show()
+
+
+def plot_tea_blob_ending_synchronously(degradation_coef=1):
+    fig = plt.figure()
+
+    dom = np.linspace(0, 300, 500)
+
+    degradation = make_attenuation(dom, degradation_coef)
+    early = make_organic_payoff(3, 1.2, 1.04, 90)(dom) * degradation
+    late = make_organic_payoff(13, 1.2, 1.04, 80)(dom) * degradation
+    plot_payoff_diff(fig, dom, early, late)
+    plt.show()
+
+
+def plot_bread_blob_ending_synchronously(degradation_coef=1):
+    fig = plt.figure()
+
+    dom = np.linspace(0, 300, 500)
+
+    degradation = make_attenuation(dom, degradation_coef)
+    early = make_organic_payoff(3, 1.2, 1.04, 90)(dom) * degradation
+    late = make_organic_payoff(13, 1.2, 1.04, 80)(dom) * 0.9 * degradation
     plot_payoff_diff(fig, dom, early, late)
     plt.show()
 
@@ -93,7 +123,7 @@ vis = collections.namedtuple("vis", ("color", "quantity"))
 
 def plot_payoff_diff(fig, dom, early, late):
     ax_values_zoomed = fig.add_subplot(311)
-    early_wins_area = early >= late
+    early_wins_area = early > late
     zoom_dst = 20
     beginning = dom < zoom_dst
     ax_values_zoomed.plot(dom[beginning], early[beginning], color="black", label="Early execution")
