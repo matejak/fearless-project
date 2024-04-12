@@ -53,6 +53,23 @@ def make_organic_payoff(lead_time, raise_rate, die_rate, die_offset=0):
     return fun
 
 
+def make_hanning_payoff(lead_time, inertia_time, full_time):
+    def fun(dom):
+        shifted_dom = dom - lead_time
+        mask = shifted_dom > 0
+        ret = np.zeros_like(dom, dtype=float)
+        raising = mask * (shifted_dom < inertia_time)
+        num_r = sum(raising)
+        ret[raising] = np.hanning(num_r * 2 + 1)[0:num_r]
+        stable = (shifted_dom > inertia_time) * (shifted_dom < inertia_time + full_time)
+        ret[stable] = 1
+        dropping = (shifted_dom > inertia_time + full_time) * (shifted_dom < 2 * inertia_time + full_time)
+        num_r = sum(dropping)
+        ret[dropping] = np.hanning(num_r * 2 + 1)[num_r + 1:]
+        return ret
+    return fun
+
+
 def plot(callback, delay, general_degradation=None, delay_degradation=1):
     fig = plt.figure()
 
@@ -74,9 +91,9 @@ def plot_tea_blob_ending_synchronously(degradation_coef=1):
     dom = np.linspace(0, 300, 500)
 
     degradation = make_attenuation(dom, degradation_coef)
-    early = make_organic_payoff(3, 1.2, 1.04, 90)(dom) * degradation
-    late = make_organic_payoff(13, 1.2, 1.04, 80)(dom) * degradation
-    plot_payoff_diff(fig, dom, early, late)
+    early = make_hanning_payoff(3, 40, 120)(dom) * degradation
+    late = make_hanning_payoff(23, 40, 100)(dom) * degradation
+    plot_payoff_diff_value_time(fig, dom, early, late, late * 0.9)
     plt.show()
 
 
@@ -86,9 +103,10 @@ def plot_bread_blob_ending_synchronously(degradation_coef=1):
     dom = np.linspace(0, 300, 500)
 
     degradation = make_attenuation(dom, degradation_coef)
+    degradation = 1
     early = make_organic_payoff(3, 1.2, 1.04, 90)(dom) * degradation
-    late = make_organic_payoff(13, 1.2, 1.04, 80)(dom) * 0.9 * degradation
-    plot_payoff_diff(fig, dom, early, late)
+    late = make_organic_payoff(13, 1.2, 1.04, 80)(dom) * degradation
+    plot_payoff_diff_value_time(fig, dom, early, late, late * 0.9)
     plt.show()
 
 
@@ -119,6 +137,32 @@ def plot_tea_organic_degrading():
 
 
 vis = collections.namedtuple("vis", ("color", "quantity"))
+
+
+def plot_payoff_diff_value_time(fig, dom, early, late, late_nontea):
+    early_wins_area = early > late_nontea
+    ax_values = fig.add_subplot(211)
+    ax_values.plot(dom, early, color="black", label="Early execution")
+    ax_values.plot(dom, late_nontea, "--", color="black", label="Late execution")
+
+    ax_values.fill_between(dom[early_wins_area], early[early_wins_area], late[early_wins_area], color="red", alpha=0.5, label="Lateness")
+    ax_values.fill_between(dom[early_wins_area], late[early_wins_area], late_nontea[early_wins_area], color="orange", alpha=0.5, label="Degradation")
+
+    ax_values.grid()
+    ax_values.legend()
+
+    ax_summary = fig.add_subplot(212)
+    stuff = dict()
+
+    lost_late = (early - late)[early_wins_area].sum()
+    lost_degraded = (late - late_nontea)[early_wins_area].sum()
+    stuff["late"] = vis(color="red", quantity=lost_late)
+    stuff["degraded"] = vis(color="orange", quantity=lost_degraded)
+    stuff["CoD"] = vis(color="black", quantity=lost_late + lost_degraded)
+    for key, val in stuff.items():
+        ax_summary.bar(key, val.quantity, color=val.color)
+
+    ax_summary.grid()
 
 
 def plot_payoff_diff(fig, dom, early, late):
