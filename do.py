@@ -458,6 +458,30 @@ class Plotter:
 
         plt.close(self.fig)
 
+    def gen_fifth(self):
+        stem_tpl = "08-{}-{}.png"
+        dom = np.linspace(-1, 18, 500)
+
+        demo = RegDemo(dom, 6)
+        homs = demo.get_homs("l")
+
+        sample = 5
+        sample_index = np.argmin(np.abs(dom - sample))
+
+        ratios = np.zeros(demo.size)
+        for idx in range(demo.size):
+            ratios[idx] = homs[idx, sample_index]
+
+        ratios /= ratios.sum()
+
+        estimus = np.zeros_like(dom)
+        for ii, scale in enumerate(demo.scales):
+            print(f"{scale:.2g}: {ratios[ii] * 100:.2g}%")
+            estimus += ratios[ii] * homs[ii]
+
+        print(f"{sample:.2g} -> {sum(ratios * demo.scales)}")
+        print(f"{sum(estimus * dom / estimus.sum())=}")
+
 
 
 dom = np.linspace(0, 20, 2000)
