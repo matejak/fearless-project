@@ -50,16 +50,8 @@ def gauss_elements(dom, scales, shape):
         vals = sp.stats.norm(loc=scale, scale=scale * shape).pdf(dom)
         vals *= scale
         homs[ii, :] = vals
-    print(f"Gauss CoV = {100 * shape:.2g}%")
+    # print(f"Gauss CoV = {100 * shape:.2g}%")
     return homs
-
-
-def lognorms(dom, scales, shape):
-    ret = np.zeros_like(dom)
-    for scale in scales:
-        ret += lognorm(dom, scale, shape) * scale
-    ret /= ret.max()
-    return ret
 
 
 def plot(dom, homs):
@@ -129,7 +121,7 @@ class FibDemo:
 
     def get_homs(self, mode):
         homs = self.MODES[mode](self.dom, self.scales, self.GOOD_LOGNORM_SHAPE)
-        homs /= homs.sum(0).max()
+        #homs /= homs.sum(0).max()
         return homs
 
     def get_cover_homs(self, mode, start, end):
@@ -152,7 +144,7 @@ class FibDemo:
         scales = self.scales
         for ii, hom in enumerate(homs):
             color_index = ii % len(self.COLOR_CAROUSEL)
-            ax.fill_between(self.dom, base, base + hom, color=self.COLOR_CAROUSEL[color_index], label=f"{scales[ii]:.2g}")
+            ax.fill_between(self.dom, base, base + hom, fc=self.COLOR_CAROUSEL[color_index], label=f"{scales[ii]:.2g}")
             ax.axvline(scales[ii], ls="--", color="k")
             base += hom
         ax.grid()
@@ -218,6 +210,12 @@ class RegDemo(FibDemo):
 class Reg2Demo(FibDemo):
     def _get_scales(self):
         natural_scales = (np.ones(self.size) * 2) ** np.arange(self.size)
+        return natural_scales * 5 / natural_scales[3]
+
+
+class EqDemo(FibDemo):
+    def _get_scales(self):
+        natural_scales = np.arange(self.size) + 1
         return natural_scales * 5 / natural_scales[3]
 
 
@@ -302,7 +300,7 @@ class Plotter:
 
         self.ax.clear()
 
-        self.ax.fill_between(dom, 0, homs.sum(0), fc="blue", alpha=0.5, label="any sp")
+        self.ax.fill_between(dom, 0, homs.sum(0), fc="blue", alpha=0.5, label="Any SP")
         self.ax.grid()
         self.ax.legend(loc="upper right")
         self.ax.set_xlabel("size / SP")
@@ -315,8 +313,8 @@ class Plotter:
         hom_five = homs[3]
 
         self.ax.clear()
-        self.ax.fill_between(dom, 0, hom_five, fc="springgreen", alpha=0.5, label="5sp")
-        self.ax.plot(dom, thin_hom_five, "--", color="blue", label="previous 5sp")
+        self.ax.fill_between(dom, 0, hom_five, fc="blue", alpha=0.5, label="5 SP")
+        self.ax.plot(dom, thin_hom_five, "--", color="black", label="Thin 5 SP")
         self.store_limits()
 
         self.ax.grid()
@@ -327,14 +325,30 @@ class Plotter:
 
         self.ax.clear()
 
-        self.apply_limits()
-        for hom in homs:
-            self.ax.fill_between(dom, 0, hom, fc="springgreen", alpha=0.5)
+        self.ax.fill_between(dom, 0, homs[0], fc="blue", alpha=0.5, label="Any SP")
+        for hom in homs[1:]:
+            self.ax.fill_between(dom, 0, hom, fc="blue", alpha=0.5)
         self.ax.grid()
         self.ax.legend(loc="upper right")
         self.ax.set_xlabel("size / SP")
         self.set_prob_axes()
         self.fig.savefig(stem_tpl.format(4, "all_gauss_thick"), dpi=self.dpi)
+
+        demor.GOOD_LOGNORM_SHAPE = 0.26
+        homs = demor.get_homs("g")
+        thick_hom_five = homs[3]
+
+        self.ax.clear()
+        self.ax.fill_between(dom, 0, thick_hom_five, fc="blue", alpha=0.5, label="5 SP")
+        self.ax.plot(dom, thin_hom_five, ":", color="black", label="Thin 5 SP")
+        self.ax.plot(dom, hom_five, "--", color="black", label="Medium 5 SP")
+        self.store_limits()
+
+        self.ax.grid()
+        self.ax.legend(loc="upper right")
+        self.ax.set_xlabel("size / SP")
+        self.set_prob_axes()
+        self.fig.savefig(stem_tpl.format(3, "gauss_really_thick"), dpi=self.dpi)
 
         plt.close(self.fig)
 
@@ -343,16 +357,17 @@ class Plotter:
         self._gen_third(demor, 3, "g", 0.15, "gauss_thin_add")
         self._gen_third(demor, 4, "g", 0.26, "gauss_thick_add")
         self._gen_third(demor, 5, "l", 0.26, "lognorm_add")
-        demof = FibDemo
-        self._gen_third(demof, 6, "l", 0.26, "fib_lognorm_add")
-        self._gen_third(demof, 7, "p", 0.26, "fib_pert_add")
+        self._gen_gauss_vs_lognorm(6, demor)
+        self._gen_lognorm_autopsy(7, demor)
 
-    def _plot_increment(self, dom, old, hom):
+    def _plot_increment(self, dom, old, hom, incr):
+        incr = round(incr)
         self.ax.clear()
 
-        self.ax.fill_between(dom, 0, old, fc="blue", alpha=0.3, label="previous")
-        self.ax.fill_between(dom, old, old + hom, fc="blue", alpha=0.5, label="next")
         self._plot_unknown_task()
+        if old.max() > 0:
+            self.ax.fill_between(dom, 0, old, fc="blue", alpha=0.3, label=f"Up to {incr} SP")
+        self.ax.fill_between(dom, old, old + hom, fc="blue", alpha=0.5, label=f"{incr} SP")
 
     def _groom_axes(self):
         self.apply_limits()
@@ -362,9 +377,70 @@ class Plotter:
         self.set_prob_axes()
 
     def _plot_unknown_task(self):
-        sparse_dom = np.array((-1, 0.5, 1, 7.5, 12, 15))
-        sparse_hom = np.array((0, 0, 1, 1, 0, 0))
-        self.ax.plot(sparse_dom, sparse_hom, "--", color="orange", label="unknown task")
+        sparse_dom_lead = np.array((-1, 0.5, 1))
+        sparse_hom_lead = np.array((0, 0, 1))
+        sparse_dom_middle = np.array((1, 7.5))
+        sparse_hom_middle = np.array((1, 1))
+        sparse_dom_trail = np.array((7.5, 12, 15))
+        sparse_hom_trail = np.array((1, 0, 0))
+        self.ax.plot(sparse_dom_lead, sparse_hom_lead, "--", color="grey")
+        self.ax.plot(sparse_dom_trail, sparse_hom_trail, "--", color="grey")
+        self.ax.plot(sparse_dom_middle, sparse_hom_middle, "-", color="grey")
+        self.ax.fill_between(sparse_dom_middle, sparse_hom_middle, "--", fc="grey", alpha=0.5, label="unknown task")
+
+    def _gen_gauss_vs_lognorm(self, number, demo_t):
+        stem_tpl = "%02d-{}-{}.png" % number
+        dom = np.linspace(-1, 13, 500)
+
+        demo = demo_t(dom, 5)
+
+        homs_gauss = demo.get_homs("g")
+        homs_lognorm = demo.get_homs("l")
+        idx_of_5sp = 3
+
+        self.start()
+
+        self.ax.plot(dom, homs_gauss[idx_of_5sp], "--", color="black", label="5 SP Thick Gauss")
+        self.ax.fill_between(dom, 0, homs_lognorm[idx_of_5sp], fc="blue", alpha=0.6, label="5 SP Lognorm")
+        self.ax.axvline(5, color="springgreen", label="5 SP")
+        self.store_limits()
+        self._groom_axes()
+
+        self.fig.savefig(stem_tpl.format(1, "gauss_vs_lognorm"), dpi=self.dpi)
+
+        plt.close(self.fig)
+
+    def _gen_lognorm_autopsy(self, number, demo_t):
+        stem_tpl = "%02d-{}-{}.png" % number
+        dom = np.linspace(-1, 13, 500)
+
+        demo = demo_t(dom, 5)
+
+        homs_lognorm = demo.get_homs("l")
+        idx_of_5sp = 3
+        idx_of_3sp = idx_of_5sp - 1
+        mask_below = dom < demo.scales[idx_of_3sp]
+        idx_of_8sp = idx_of_5sp + 1
+        mask_above = dom > demo.scales[idx_of_8sp]
+        mask_inter = 1 - (mask_below + mask_above)
+        mask_inter = mask_inter.astype(bool)
+        hom_5sp = homs_lognorm[idx_of_5sp]
+        total_sum = hom_5sp.sum()
+
+        self.start()
+
+        ratio_below = hom_5sp[mask_below].sum() / total_sum
+        ratio_above = hom_5sp[mask_above].sum() / total_sum
+        ratio_inter = hom_5sp[mask_inter].sum() / total_sum
+        self.ax.fill_between(dom[mask_below], 0, hom_5sp[mask_below], fc="green", alpha=0.6, label=f"Below 3 SP - {100 * ratio_below:.2g}%")
+        self.ax.fill_between(dom[mask_inter], 0, hom_5sp[mask_inter], fc="blue", alpha=0.6, label=f"In Between - {100 * ratio_inter:.2g}%")
+        self.ax.fill_between(dom[mask_above], 0, hom_5sp[mask_above], fc="red", alpha=0.6, label=f"Above 8 SP - {100 * ratio_above:.2g}%")
+        self.store_limits()
+        self._groom_axes()
+
+        self.fig.savefig(stem_tpl.format(1, "lognorm_analyzed"), dpi=self.dpi)
+
+        plt.close(self.fig)
 
     def _gen_third(self, demo_t, number, mode, constant, series_desc):
         stem_tpl = "%02d-{}-{}.png" % number
@@ -389,7 +465,7 @@ class Plotter:
         old = np.zeros_like(demo.dom)
         for ii, hom in enumerate(homs):
 
-            self._plot_increment(dom, old, hom)
+            self._plot_increment(dom, old, hom, demo.scales[ii])
             if ii > 2:
                 self.ax.plot(dom, homs[3], "--", color="black", label="5 SP")
             self._groom_axes()
@@ -460,28 +536,60 @@ class Plotter:
 
     def gen_fifth(self):
         stem_tpl = "08-{}-{}.png"
-        dom = np.linspace(-1, 18, 500)
+        dom = np.linspace(-1, 19, 501)
 
-        demo = RegDemo(dom, 6)
+        num_scales = 6
+        demo = RegDemo(dom, num_scales)
+        demo.GOOD_LOGNORM_SHAPE = 0.26
         homs = demo.get_homs("l")
 
         sample = 5
         sample_index = np.argmin(np.abs(dom - sample))
 
+        self.start()
+        base_color = np.array((0.8, 0.25, 0))
+        color_inc = np.array((-0.5 / demo.size, 0.7 / demo.size, 0.85 / demo.size))
         ratios = np.zeros(demo.size)
         for idx in range(demo.size):
-            ratios[idx] = homs[idx, sample_index]
-
+            norming = demo.scales[idx]
+            norming = 1
+            ratios[idx] = homs[idx, sample_index] / demo.scales[idx] / norming
+            print(f"{idx}: {sum(homs[idx]) / demo.scales[idx]:.2g}")
         ratios /= ratios.sum()
-
-        estimus = np.zeros_like(dom)
         for ii, scale in enumerate(demo.scales):
             print(f"{scale:.2g}: {ratios[ii] * 100:.2g}%")
-            estimus += ratios[ii] * homs[ii]
 
         print(f"{sample:.2g} -> {sum(ratios * demo.scales)}")
-        print(f"{sum(estimus * dom / estimus.sum())=}")
 
+        cumsum = np.zeros_like(dom)
+        for idx, scale in enumerate(demo.scales):
+            increment = homs[idx] / scale
+            self.ax.fill_between(dom, cumsum, cumsum + increment, fc=base_color + color_inc * idx, label=f"{demo.scales[idx]:.2g}")
+            cumsum += increment
+        self._groom_axes()
+        self.fig.savefig(stem_tpl.format(6, f"composition_of_{sample}"), dpi=self.dpi)
+
+        self.ax.clear()
+        for idx, scale in enumerate(demo.scales):
+            self.ax.plot(dom, homs[idx] / scale, color=base_color + color_inc * idx, label=f"{demo.scales[idx]:.2g}")
+        self._groom_axes()
+        self.fig.savefig(stem_tpl.format(6, f"composition_of_{sample}-2"), dpi=self.dpi)
+
+        self.ax.clear()
+        expected_estimate_values = np.zeros_like(dom)
+        nonzero_mask = sum(homs, 0) > 0
+        norming = demo.scales.reshape(num_scales, 1)
+        # norming = 1
+        nonzero_homs = homs.copy()[:, nonzero_mask] / demo.scales.reshape(num_scales, 1) / norming
+        nonzero_homs /= sum(nonzero_homs, 0)
+        expected_estimate_values[nonzero_mask] = sum(demo.scales.reshape(num_scales, 1) * nonzero_homs, 0)
+        self.ax.plot(dom[nonzero_mask], expected_estimate_values[nonzero_mask], color="blue", label=f"Expected SPs")
+        self.ax.plot(dom[nonzero_mask], dom[nonzero_mask], color="black", label=f"SPs")
+        self.ax.grid()
+        self.ax.set_xlabel("size / SP")
+        self.ax.set_ylabel("size / SP")
+        self.fig.savefig(stem_tpl.format(6, f"composition_of_{sample}-3"), dpi=self.dpi)
+        plt.close(self.fig)
 
 
 dom = np.linspace(0, 20, 2000)
@@ -490,3 +598,5 @@ demof = FibDemo(dom)
 demor = RegDemo(dom)
 
 plotter = Plotter()
+
+# TODO: How to estimate a 4SP or 5SP task?
