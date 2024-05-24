@@ -12,31 +12,39 @@ from estimage.entities import estimate
 # PYTHONPATH=$HOME/git/estimage/ ipython --pylab
 
 
-def lognorm(dom, scale, shape):
-    dist = sp.stats.lognorm(scale=scale, s=shape)
-    return dist.pdf(dom)
+def norm_lognorm_scale(scale, shape):
+    normed_scale = scale / np.exp(shape ** 2 / 2.0)
+    return normed_scale
+
+
+def get_lognorm_dist(scale, shape):
+    normed_scale = norm_lognorm_scale(scale, shape)
+    dist = sp.stats.lognorm(scale=normed_scale, s=shape)
+    return dist
 
 
 def lognorm_cov(shape):
     return np.sqrt(np.exp(shape ** 2) - 1)
 
 
-def lognorm_elements(dom, scales, shape):
-    normed_scales = scales / np.exp(shape ** 2 / 2.0)
+def lognorm_elements(dom, scales, various):
+    shape = various.GOOD_LOGNORM_SHAPE
+    normed_scales = norm_lognorm_scale(scales, shape)
     homs = np.zeros((normed_scales.size, dom.size))
     for ii, scale in enumerate(normed_scales):
-        vals = lognorm(dom, scale, shape)
+        vals = sp.stats.lognorm.pdf(dom, scale=scale, s=shape)
         vals *= scale
         homs[ii, :] = vals
     print(f"Lognorm CoV = {100 * lognorm_cov(shape):.2g}%")
     return homs
 
 
-def pert_elements(dom, scales, shape):
+def pert_elements(dom, scales, various):
+    shape = various.GOOD_LOGNORM_SHAPE
     homs = np.zeros((scales.size, dom.size))
     for ii, scale in enumerate(scales):
         lognorm_scale = scale / np.exp(shape ** 2 / 2.0)
-        est = produce_estimate_from_lognorm(lognorm_scale, shape)
+        est = produce_estimate_from_lognorm(lognorm_scale, shape, various.LAMBDA)
         _, vals = est.get_pert(len(dom,), dom)
         vals *= scale
         homs[ii, :] = vals
@@ -44,7 +52,8 @@ def pert_elements(dom, scales, shape):
     return homs
 
 
-def gauss_elements(dom, scales, shape):
+def gauss_elements(dom, scales, various):
+    shape = various.GOOD_GAUSS_SHAPE
     homs = np.zeros((scales.size, dom.size))
     for ii, scale in enumerate(scales):
         vals = sp.stats.norm(loc=scale, scale=scale * shape).pdf(dom)
@@ -63,13 +72,13 @@ def plot(dom, homs):
     pyl.show()
 
 
-def produce_estimate_from_lognorm(scale, shape):
-    expected = np.exp(shape ** 2 / 2.0) * scale
-    mode = scale / np.exp(shape ** 2)
-    variance = (np.exp(shape ** 2) - 1) * scale ** 2 * np.exp(shape ** 2)
-    optimistic, pessimistic = estimate.calculate_o_p(mode, expected, variance)
-    # print(f"{optimistic=} {pessimistic=} {mode=}, {scale=} rel_span={(pessimistic - optimistic) / scale:.02g}")
-    return estimate.Estimate.from_triple(mode, optimistic, pessimistic)
+def produce_estimate_from_lognorm(lognorm_scale, shape, lam):
+    expected = np.exp(shape ** 2 / 2.0) * lognorm_scale
+    mode = lognorm_scale / np.exp(shape ** 2)
+    variance = (np.exp(shape ** 2) - 1) * lognorm_scale ** 2 * np.exp(shape ** 2)
+    optimistic, pessimistic = estimate.calculate_o_p_ext(mode, expected, variance, lam)
+    # print(f"{optimistic=} {pessimistic=} {mode=}, {lognorm_scale=} rel_span={(pessimistic - optimistic) / lognorm_scale:.02g}")
+    return estimate.Estimate.from_triple(mode, optimistic, pessimistic, lam)
 
 
 def get_slice(dom, val_start, val_end):
@@ -98,6 +107,7 @@ def cover_area(functions, sl=None):
 
 class FibDemo:
     GOOD_LOGNORM_SHAPE = 0.27
+    GOOD_GAUSS_SHAPE = 0.27 * 5
     MODES = dict(l=lognorm_elements, p=pert_elements, g=gauss_elements)
     COLOR_CAROUSEL = ("lightsteelblue", "cornflowerblue", "royalblue", "dodgerblue")
     COLOR_CAROUSEL2 = ("springgreen", "limegreen", "seagreen", "lawngreen")
@@ -120,7 +130,7 @@ class FibDemo:
         return self._get_scales()
 
     def get_homs(self, mode):
-        homs = self.MODES[mode](self.dom, self.scales, self.GOOD_LOGNORM_SHAPE)
+        homs = self.MODES[mode](self.dom, self.scales, self)
         #homs /= homs.sum(0).max()
         return homs
 
@@ -285,7 +295,7 @@ class Plotter:
         dom = np.linspace(-1, 15, 500)
 
         demor = RegDemo(dom)
-        demor.GOOD_LOGNORM_SHAPE = 0.05
+        demor.GOOD_GAUSS_SHAPE = 0.05
         homs = demor.get_homs("g")
         hom_five = homs[3]
 
@@ -307,7 +317,7 @@ class Plotter:
         self.set_prob_axes()
         self.fig.savefig(stem_tpl.format(2, "all_gauss_thin"), dpi=self.dpi)
 
-        demor.GOOD_LOGNORM_SHAPE = 0.15
+        demor.GOOD_GAUSS_SHAPE = 0.15
         homs = demor.get_homs("g")
         thin_hom_five = hom_five
         hom_five = homs[3]
@@ -334,7 +344,7 @@ class Plotter:
         self.set_prob_axes()
         self.fig.savefig(stem_tpl.format(4, "all_gauss_thick"), dpi=self.dpi)
 
-        demor.GOOD_LOGNORM_SHAPE = 0.26
+        demor.GOOD_GAUSS_SHAPE = 0.26
         homs = demor.get_homs("g")
         thick_hom_five = homs[3]
 
@@ -354,11 +364,17 @@ class Plotter:
 
     def gen_third(self):
         demor = RegDemo
-        self._gen_third(demor, 3, "g", 0.15, "gauss_thin_add")
-        self._gen_third(demor, 4, "g", 0.26, "gauss_thick_add")
-        self._gen_third(demor, 5, "l", 0.26, "lognorm_add")
-        self._gen_gauss_vs_lognorm(6, demor)
-        self._gen_lognorm_autopsy(7, demor)
+        demor.GOOD_GAUSS_SHAPE = 0.15
+        self._gen_third(demor, 3, "g", "gauss_thin_add")
+        demor.GOOD_GAUSS_SHAPE = 0.26
+        self._gen_third(demor, 4, "g", "gauss_thick_add")
+        self._gen_third(demor, 5, "l", "lognorm_add")
+        demor.LAMBDA = 4
+        self._gen_third(demor, 6, "p", "pert_std_add")
+        demor.LAMBDA = 12
+        self._gen_third(demor, 7, "p", "pert_mod_add")
+        self._gen_gauss_vs_lognorm(8, demor)
+        self._gen_lognorm_autopsy(9, demor)
 
     def _plot_increment(self, dom, old, hom, incr):
         incr = round(incr)
@@ -442,12 +458,11 @@ class Plotter:
 
         plt.close(self.fig)
 
-    def _gen_third(self, demo_t, number, mode, constant, series_desc):
+    def _gen_third(self, demo_t, number, mode, series_desc):
         stem_tpl = "%02d-{}-{}.png" % number
         dom = np.linspace(-1, 15, 500)
 
         demo = demo_t(dom, 6)
-        demo.GOOD_LOGNORM_SHAPE = constant
         homs = demo.get_homs(mode)
 
         self.start()
@@ -535,6 +550,7 @@ class Plotter:
         plt.close(self.fig)
 
     def gen_fifth(self):
+        # Ideal Estimator, composition of estimates
         stem_tpl = "08-{}-{}.png"
         dom = np.linspace(-1, 19, 501)
 
@@ -589,6 +605,34 @@ class Plotter:
         self.ax.set_xlabel("size / SP")
         self.ax.set_ylabel("size / SP")
         self.fig.savefig(stem_tpl.format(6, f"composition_of_{sample}-3"), dpi=self.dpi)
+        plt.close(self.fig)
+
+    def gen_sixth(self):
+        stem_tpl = "09-{}-{}.png"
+        dom = np.linspace(-1, 19, 501)
+
+        GOOD_LOGNORM_SHAPE = 0.26
+
+        sample = 5
+        dist = get_lognorm_dist(scale=sample, shape=GOOD_LOGNORM_SHAPE)
+        mean = dist.mean()
+        var = dist.var()
+        normed_scale = norm_lognorm_scale(sample, GOOD_LOGNORM_SHAPE)
+        mode = np.exp(np.log(normed_scale) - GOOD_LOGNORM_SHAPE**2)
+
+        self.start()
+        for pert_lambda in [2, 4, 8, 16, 32, 64]:
+            o, p = estimate.calculate_o_p_ext(mode, mean, var, pert_lambda)
+            pert = estimate.Estimate.from_triple(mode, o, p, pert_lambda)
+            self.ax.plot(dom, dist.pdf(dom), "--", color="black", label=f"lognorm")
+            self.ax.fill_between(dom, 0, pert.get_pert(dom=dom)[1], fc="blue", alpha=0.5, label=f"pert {pert_lambda}")
+            self.ax.axvline(mode, color="springgreen")
+            self.ax.grid()
+            self.ax.set_xlabel("size / SP")
+            self.ax.set_ylabel("Probability Density")
+            self.ax.legend()
+            self.fig.savefig(stem_tpl.format(1, f"lognorm_PERT-{pert_lambda:02d}"), dpi=self.dpi)
+            self.ax.clear()
         plt.close(self.fig)
 
 
