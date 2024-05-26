@@ -635,6 +635,51 @@ class Plotter:
             self.ax.clear()
         plt.close(self.fig)
 
+    def gen_seventh(self):
+        stem_tpl = "10-{}-{}.png"
+        self.start()
+
+        src = 0.5
+
+        self._compare_estimates(5, 3, 8, src)
+        self.fig.savefig(stem_tpl.format(1, f"lognorm-like"), dpi=self.dpi)
+        self.ax.clear()
+
+        self._compare_estimates(5, 2, 8, src)
+        self.fig.savefig(stem_tpl.format(2, f"gauss-like"), dpi=self.dpi)
+        self.ax.clear()
+
+        self._compare_estimates(5, 4, 9, src)
+        self.fig.savefig(stem_tpl.format(3, f"skewed"), dpi=self.dpi)
+        self.ax.clear()
+
+        plt.close(self.fig)
+
+    def _compare_estimates(self, m, o, p, l0, l1=64):
+        e1 = estimage.data.Estimate.from_triple(m, o, p, l0)
+        o2, p2 = estimage.entities.estimate.calculate_o_p_ext(m, e1.expected, e1.variance, l1)
+        e2 = estimage.data.Estimate.from_triple(m, o2, p2, l1)
+        dist = e2._get_rv()
+
+        dom = np.linspace(dist.ppf(0.001) - 1, dist.ppf(0.999) + 1, 500)
+        hom_orig = e1.get_pert(dom=dom)[1]
+        hom_2 = e2.get_pert(dom=dom)[1]
+
+        ratio_below = dist.cdf(o)
+        ratio_above = 1 - dist.cdf(p)
+        ratio_inter = 1 - ratio_below - ratio_above
+        mask_below = dom < o
+        mask_inter = (dom >= o) * (dom <= p)
+        mask_above = dom > p
+        self.ax.plot(dom, hom_orig, "--", color="black", alpha=0.6, label=f"Original setting")
+        self.ax.fill_between(dom[mask_below], 0, hom_2[mask_below], fc="green", alpha=0.6, label=f"Below - {100 * ratio_below:.2g}%")
+        self.ax.fill_between(dom[mask_inter], 0, hom_2[mask_inter], fc="blue", alpha=0.6, label=f"In Between - {100 * ratio_inter:.2g}%")
+        self.ax.fill_between(dom[mask_above], 0, hom_2[mask_above], fc="red", alpha=0.6, label=f"Above - {100 * ratio_above:.2g}%")
+        self.store_limits()
+        self._groom_axes()
+
+        print(f"{o=} {o2=} {p=} {p2=} {e1.expected} {e2.expected}")
+
 
 dom = np.linspace(0, 20, 2000)
 
