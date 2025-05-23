@@ -7,226 +7,16 @@ import matplotlib.transforms as transforms
 
 import estimage
 from estimage.entities import estimate
+import demos, elements, utils
 
 # Execute me as
 # PYTHONPATH=$HOME/git/estimage/ ipython --pylab
-
-
-def norm_lognorm_scale(scale, shape):
-    normed_scale = scale / np.exp(shape ** 2 / 2.0)
-    return normed_scale
-
-
-def get_lognorm_dist(scale, shape):
-    normed_scale = norm_lognorm_scale(scale, shape)
-    dist = sp.stats.lognorm(scale=normed_scale, s=shape)
-    return dist
-
-
-def lognorm_cov(shape):
-    return np.sqrt(np.exp(shape ** 2) - 1)
-
-
-def lognorm_elements(dom, scales, various):
-    shape = various.GOOD_LOGNORM_SHAPE
-    normed_scales = norm_lognorm_scale(scales, shape)
-    homs = np.zeros((normed_scales.size, dom.size))
-    for ii, scale in enumerate(normed_scales):
-        vals = sp.stats.lognorm.pdf(dom, scale=scale, s=shape)
-        vals *= scale
-        homs[ii, :] = vals
-    print(f"Lognorm CoV = {100 * lognorm_cov(shape):.2g}%")
-    return homs
-
-
-def pert_elements(dom, scales, various):
-    shape = various.GOOD_LOGNORM_SHAPE
-    homs = np.zeros((scales.size, dom.size))
-    for ii, scale in enumerate(scales):
-        lognorm_scale = scale / np.exp(shape ** 2 / 2.0)
-        est = produce_estimate_from_lognorm(lognorm_scale, shape, various.LAMBDA)
-        _, vals = est.get_pert(len(dom,), dom)
-        vals *= scale
-        homs[ii, :] = vals
-    print(f"Pert CoV = {100 * est.sigma / est.expected:.2g}%")
-    return homs
-
-
-def gauss_elements(dom, scales, various):
-    shape = various.GOOD_GAUSS_SHAPE
-    homs = np.zeros((scales.size, dom.size))
-    for ii, scale in enumerate(scales):
-        vals = sp.stats.norm(loc=scale, scale=scale * shape).pdf(dom)
-        vals *= scale
-        homs[ii, :] = vals
-    # print(f"Gauss CoV = {100 * shape:.2g}%")
-    return homs
-
-
-def plot(dom, homs):
-    pyl.figure()
-    for hom in homs:
-        pyl.plot(dom, hom)
-    pyl.plot(dom, homs.sum(0), '--')
-    pyl.grid()
-    pyl.show()
-
-
-def produce_estimate_from_lognorm(lognorm_scale, shape, lam):
-    expected = np.exp(shape ** 2 / 2.0) * lognorm_scale
-    mode = lognorm_scale / np.exp(shape ** 2)
-    variance = (np.exp(shape ** 2) - 1) * lognorm_scale ** 2 * np.exp(shape ** 2)
-    optimistic, pessimistic = estimate.calculate_o_p_ext(mode, expected, variance, lam)
-    # print(f"{optimistic=} {pessimistic=} {mode=}, {lognorm_scale=} rel_span={(pessimistic - optimistic) / lognorm_scale:.02g}")
-    return estimate.Estimate.from_triple(mode, optimistic, pessimistic, lam)
 
 
 def get_slice(dom, val_start, val_end):
     idx_start = np.argmin(np.abs(dom - val_start))
     idx_end = np.argmin(np.abs(dom - val_end))
     return slice(idx_start, idx_end)
-
-
-def cover_area(functions, sl=None):
-    coverage = np.empty_like(functions)
-    if not sl:
-        sl = slice(0, None)
-    selection = np.array([f[sl] for f in functions])
-    qr = np.linalg.qr(selection.T)
-    bases = qr.Q.T
-    how = qr.R
-    target = np.ones_like(bases[0])
-    coefs = np.zeros(len(bases))
-    for ii, base in enumerate(bases):
-        coefs[ii] = np.dot(base, target)
-    coefs @= np.linalg.inv(how).T
-    for ii, base in enumerate(bases):
-        coverage[ii] = coefs[ii] * functions[ii]
-    return coverage
-
-
-class FibDemo:
-    GOOD_LOGNORM_SHAPE = 0.27
-    GOOD_GAUSS_SHAPE = 0.27 * 5
-    MODES = dict(l=lognorm_elements, p=pert_elements, g=gauss_elements)
-    COLOR_CAROUSEL = ("lightsteelblue", "cornflowerblue", "royalblue", "dodgerblue")
-    COLOR_CAROUSEL2 = ("springgreen", "limegreen", "seagreen", "lawngreen")
-
-    def __init__(self, dom, size=7):
-        self.dom = dom
-        self.size = size
-
-    def _restrict_dom(self):
-        scales = self._get_scales()
-        meaningful_values = self.dom > scales[0] * 0.5
-        meaningful_values * self.dom < scales[-1] * 1.2
-        self.dom = self.dom[meaningful_values]
-
-    def _get_scales(self):
-        return np.array([1, 2, 3, 5, 8, 13, 21, 34, 55, 89])[:self.size]
-
-    @property
-    def scales(self):
-        return self._get_scales()
-
-    def get_homs(self, mode):
-        homs = self.MODES[mode](self.dom, self.scales, self)
-        #homs /= homs.sum(0).max()
-        return homs
-
-    def get_cover_homs(self, mode, start, end):
-        homs = self.get_homs(mode)
-
-        cover_homs = cover_area(homs, get_slice(self.dom, start, end))
-        return cover_homs
-
-    def show_layers(self, mode, limits=None):
-        fig = pyl.figure()
-        ax = fig.add_subplot(111)
-        if limits:
-            start, end = limits
-            homs = self.get_cover_homs(mode, start, end)
-            trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
-            ax.fill_betweenx((0, 1.0), start, end, transform=trans, color="orange", alpha=0.3)
-        else:
-            homs = self.get_homs(mode)
-        base = np.zeros_like(homs[0])
-        scales = self.scales
-        for ii, hom in enumerate(homs):
-            color_index = ii % len(self.COLOR_CAROUSEL)
-            ax.fill_between(self.dom, base, base + hom, fc=self.COLOR_CAROUSEL[color_index], label=f"{scales[ii]:.2g}")
-            ax.axvline(scales[ii], ls="--", color="k")
-            base += hom
-        ax.grid()
-        ax.legend(loc="upper right")
-        pyl.show()
-
-    def show_homs(self, mode, limits=None):
-        fig = pyl.figure()
-        ax = fig.add_subplot(111)
-        if limits:
-            start, end = limits
-            homs = self.get_cover_homs(mode, start, end)
-            trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
-            ax.fill_betweenx((0, 1.0), start, end, transform=trans, color="orange", alpha=0.3)
-        else:
-            homs = self.get_homs(mode)
-        scales = self.scales
-        mean = np.zeros_like(homs[0])
-        for ii, hom in enumerate(homs):
-            color_index = ii % len(self.COLOR_CAROUSEL)
-            scale = scales[ii]
-            ax.plot(self.dom, hom, color=self.COLOR_CAROUSEL[color_index], label=f"{scale:.2g}")
-            ax.axvline(scales[ii], ls="--", color="k")
-            mean += scale * hom
-        ax.plot(self.dom, homs.sum(0), ls="--", color="orchid", label="coverage")
-        ax.plot(self.dom, mean / self.dom, ls="-", color="orange", label="mean")
-        ax.grid()
-        ax.legend(loc="upper right")
-        pyl.show()
-
-    def show_comparison(self, mode1, mode2, limits=None):
-        fig = pyl.figure()
-        ax = fig.add_subplot(111)
-        if limits:
-            start, end = limits
-            homs1 = self.get_cover_homs(mode1, start, end)
-            homs2 = self.get_cover_homs(mode2, start, end)
-            trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
-            ax.fill_betweenx((0, 1.0), start, end, transform=trans, color="orange", alpha=0.3)
-        else:
-            homs1 = self.get_homs(mode1)
-            homs2 = self.get_homs(mode2)
-        scales = self.scales
-        for ii, hom in enumerate(homs1):
-            color_index = ii % len(self.COLOR_CAROUSEL)
-            ax.plot(self.dom, hom, color=self.COLOR_CAROUSEL[color_index], label=f"{scales[ii]:.2g}")
-            ax.plot(self.dom, -homs2[ii], color=self.COLOR_CAROUSEL2[color_index])
-            ax.axvline(scales[ii], ls="--", color="k")
-        ax.plot(self.dom, homs1.sum(0), ls="--", color="orchid", label="coverage")
-        ax.plot(self.dom, -homs2.sum(0), ls="--", color="goldenrod")
-        ax.grid()
-        ax.legend(loc="upper right")
-        pyl.show()
-
-
-
-class RegDemo(FibDemo):
-    def _get_scales(self):
-        natural_scales = (np.ones(self.size) * 1.618) ** np.arange(self.size)
-        return natural_scales * 5 / natural_scales[3]
-
-
-class Reg2Demo(FibDemo):
-    def _get_scales(self):
-        natural_scales = (np.ones(self.size) * 2) ** np.arange(self.size)
-        return natural_scales * 5 / natural_scales[3]
-
-
-class EqDemo(FibDemo):
-    def _get_scales(self):
-        natural_scales = np.arange(self.size) + 1
-        return natural_scales * 5 / natural_scales[3]
 
 
 class Plotter:
@@ -263,7 +53,7 @@ class Plotter:
         print(f"Steak CoV: {100 * steak_dist.std() / steak_dist.mean():.2g}%")
         call_lognorm_shape = 0.32
         call = sp.stats.lognorm(scale=11.5, s=call_lognorm_shape).pdf(dom)
-        print(f"Call CoV: {100 * lognorm_cov(call_lognorm_shape):.2g}%")
+        print(f"Call CoV: {100 * elements.LognormElements.lognorm_coefficient_of_variance(call_lognorm_shape):.2g}%")
 
         self.start()
 
@@ -294,7 +84,7 @@ class Plotter:
         stem_tpl = "02-{}-{}.png"
         dom = np.linspace(-1, 15, 500)
 
-        demor = RegDemo(dom)
+        demor = demos.RegDemo(dom)
         demor.GOOD_GAUSS_SHAPE = 0.05
         homs = demor.get_homs("g")
         hom_five = homs[3]
@@ -363,15 +153,15 @@ class Plotter:
         plt.close(self.fig)
 
     def gen_third(self):
-        demor = RegDemo
+        demor = demos.RegDemo
         demor.GOOD_GAUSS_SHAPE = 0.15
         self._gen_third(demor, 3, "g", "gauss_thin_add")
         demor.GOOD_GAUSS_SHAPE = 0.26
         self._gen_third(demor, 4, "g", "gauss_thick_add")
         self._gen_third(demor, 5, "l", "lognorm_add")
-        demor.LAMBDA = 4
+        demor.GAMMA = 4
         self._gen_third(demor, 6, "p", "pert_std_add")
-        demor.LAMBDA = 12
+        demor.GAMMA = 12
         self._gen_third(demor, 7, "p", "pert_mod_add")
         self._gen_gauss_vs_lognorm(8, demor)
         self._gen_lognorm_autopsy(9, demor)
@@ -509,14 +299,14 @@ class Plotter:
         stem_tpl = "08-{}-{}.png"
         dom = np.linspace(-1, 18, 500)
 
-        demo = RegDemo(dom, 5)
+        demo = demos.RegDemo(dom, 5)
         homs = demo.get_homs("l")
 
         self.start()
 
         scale8 = demo._get_scales()[-1]
         scale2 = scale8 / 4.0
-        hom_two = lognorm_elements(dom, [scale2], demo.GOOD_LOGNORM_SHAPE)[0]
+        hom_two = elements.LognormElements(dom, [scale2], demo).compute_elements()[0]
         hom8 = homs[-1]
         rolling_hom = np.zeros((5, len(dom)))
         rolling_hom[0, :] = hom_two
@@ -555,7 +345,7 @@ class Plotter:
         dom = np.linspace(-1, 19, 501)
 
         num_scales = 6
-        demo = RegDemo(dom, num_scales)
+        demo = demos.RegDemo(dom, num_scales)
         demo.GOOD_LOGNORM_SHAPE = 0.26
         homs = demo.get_homs("l")
 
@@ -599,6 +389,9 @@ class Plotter:
         nonzero_homs = homs.copy()[:, nonzero_mask] / demo.scales.reshape(num_scales, 1) / norming
         nonzero_homs /= sum(nonzero_homs, 0)
         expected_estimate_values[nonzero_mask] = sum(demo.scales.reshape(num_scales, 1) * nonzero_homs, 0)
+
+        # TODO: for a set of Dom values, calculate expected value (we know that already) and stdev (calculate using custom discrete distribution)
+
         self.ax.plot(dom[nonzero_mask], expected_estimate_values[nonzero_mask], color="blue", label=f"Expected SPs")
         self.ax.plot(dom[nonzero_mask], dom[nonzero_mask], color="black", label=f"SPs")
         self.ax.grid()
@@ -614,10 +407,10 @@ class Plotter:
         GOOD_LOGNORM_SHAPE = 0.26
 
         sample = 5
-        dist = get_lognorm_dist(scale=sample, shape=GOOD_LOGNORM_SHAPE)
+        dist = utils.get_lognorm_dist(scale=sample, shape=GOOD_LOGNORM_SHAPE)
         mean = dist.mean()
         var = dist.var()
-        normed_scale = norm_lognorm_scale(sample, GOOD_LOGNORM_SHAPE)
+        normed_scale = utils.norm_lognorm_scale(sample, GOOD_LOGNORM_SHAPE)
         mode = np.exp(np.log(normed_scale) - GOOD_LOGNORM_SHAPE**2)
 
         self.start()
@@ -656,9 +449,9 @@ class Plotter:
         plt.close(self.fig)
 
     def _compare_estimates(self, m, o, p, l0, l1=64):
-        e1 = estimage.data.Estimate.from_triple(m, o, p, l0)
-        o2, p2 = estimage.entities.estimate.calculate_o_p_ext(m, e1.expected, e1.variance, l1)
-        e2 = estimage.data.Estimate.from_triple(m, o2, p2, l1)
+        e1 = estimate.Estimate.from_triple(m, o, p, l0)
+        o2, p2 = estimate.calculate_o_p_ext(m, e1.expected, e1.variance, l1)
+        e2 = estimate.Estimate.from_triple(m, o2, p2, l1)
         dist = e2._get_rv()
 
         dom = np.linspace(dist.ppf(0.001) - 1, dist.ppf(0.999) + 1, 500)
@@ -683,9 +476,16 @@ class Plotter:
 
 dom = np.linspace(0, 20, 2000)
 
-demof = FibDemo(dom)
-demor = RegDemo(dom)
+demof = demos.FibDemo(dom)
+demor = demos.RegDemo(dom)
 
 plotter = Plotter()
+# plotter.gen_first()
+# plotter.gen_second()
+# plotter.gen_third()
+# plotter.gen_fourth()
+plotter.gen_fifth()
+# plotter.gen_sixth()
+# plotter.gen_seventh()
 
 # TODO: How to estimate a 4SP or 5SP task?
