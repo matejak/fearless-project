@@ -378,8 +378,23 @@ class Plotter:
         self.ax.clear()
         for idx, scale in enumerate(demo.scales):
             self.ax.plot(dom, homs[idx] / scale, color=base_color + color_inc * idx, label=f"{demo.scales[idx]:.2g}")
+        sample_scale_index = 3
+        between_sample_and_neighbor = (demo.scales[sample_scale_index] + demo.scales[sample_scale_index - 1]) / 2.0
+        self.ax.axvline(between_sample_and_neighbor, color="gray", ls="--", label=f"{between_sample_and_neighbor:.2g}")
         self._groom_axes()
         self.fig.savefig(stem_tpl.format(6, f"composition_of_{sample}-2"), dpi=self.dpi)
+
+        self.ax.clear()
+        homs_normed = homs.copy() / demo.scales[:, np.newaxis] ** 2
+        homs_sums = np.sum(homs_normed, 0)
+        homs_normed /= homs_sums[np.newaxis]
+        cumsum = np.zeros_like(homs_normed[0])
+        for idx, scale in enumerate(demo.scales):
+            self.ax.fill_between(dom, cumsum, cumsum + homs_normed[idx], fc=base_color + color_inc * idx, label=f"{demo.scales[idx]:.2g}")
+            cumsum += homs_normed[idx]
+        self.ax.axvline(between_sample_and_neighbor, color="gray", ls="--", label=f"{between_sample_and_neighbor:.2g}")
+        self._groom_axes()
+        self.fig.savefig(stem_tpl.format(6, f"composition_of_{sample}-x"), dpi=self.dpi)
 
         self.ax.clear()
         expected_estimate_values = np.zeros_like(dom)
